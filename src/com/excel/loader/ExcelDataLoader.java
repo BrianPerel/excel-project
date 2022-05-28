@@ -1,16 +1,18 @@
 package com.excel.loader;
 
+import java.awt.Desktop;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.SecureRandom;
-import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.Properties;
 import java.util.logging.Logger;
 
@@ -26,24 +28,41 @@ public class ExcelDataLoader {
   private static String startDate;
   private static String fileSaveLocation;
   private static int daysInRotationSchedule;
+  private static boolean isFileOpeningEnabled;
   private static String[] teamMembers = new String[9];
   private static final Logger logger_ = Logger.getLogger(ExcelDataLoader.class.getSimpleName());
 
+  /**
+   * Adds data of names and dates to the array list to prepare to write to the excel file
+   * @param random object
+   * @param dsuData data of names and dates
+   * @throws IOException 
+   */
   private static void addData(SecureRandom random, ArrayList<MyData> dsuData) {
-    // TODO: prevent duplicate names from being added in the same week
+    ArrayList<String> unusableNames = new ArrayList<>();
+    
     for (int dayNumber = 0; dayNumber < daysInRotationSchedule; dayNumber++ ) {
-      String name = teamMembers[random.nextInt(teamMembers.length)];
+      String name = teamMembers[random.nextInt(teamMembers.length)].trim();
+
+      // while unusable names array list contains this name we have chosen, pick another name. Array list is refreshed
+      // for every week, if the day we just completed for was Friday
+      while (unusableNames.contains(name)) {
+        name = teamMembers[random.nextInt(teamMembers.length)].trim();
+      }
+
       String date = getDsuDate(dayNumber);
 
       // avoid adding Saturdays and Sundays to the schedule maker, by only adding the record if the date doesn't
       // start with "Sat" or "Sun"
       if (!date.startsWith("Sat") && !date.startsWith("Sun")) {
         dsuData.add(new MyData(name, date));
+        unusableNames.add(name);
       }
 
       // add in an empty row to separate the weeks. If the date that was just added in the loop started with "Fri"
       if (date.startsWith("Fri")) {
         dsuData.add(new MyData("", ""));
+        unusableNames.clear();
       }
     }
   }
@@ -60,14 +79,12 @@ public class ExcelDataLoader {
 
     setHeaders(workbook, row);
 
-    // writing the data into the sheets...
-    for (MyData record : dsuData) {
+    // writing the data into the sheets
+    for (MyData dataRecord : dsuData) {
       row = spreadsheet.createRow(rowid++ );
-      row.createCell(0).setCellValue(getCellValue(record, 0));
-      row.createCell(1).setCellValue(getCellValue(record, 1));
+      row.createCell(0).setCellValue(getCellValue(dataRecord, 0));
+      row.createCell(1).setCellValue(getCellValue(dataRecord, 1));
     }
-
-    createFile(workbook);
   }
 
   /**
@@ -78,6 +95,10 @@ public class ExcelDataLoader {
     try (FileOutputStream out = new FileOutputStream(new File(fileSaveLocation))) {
       workbook.write(out);
       logger_.info("Process complete - excel file created");
+      
+      if(isFileOpeningEnabled) {
+        Desktop.getDesktop().open(new File(fileSaveLocation));
+      }
     }
     catch (IOException ex1) {
       logger_.severe(ex1.getMessage());
@@ -87,7 +108,7 @@ public class ExcelDataLoader {
   /**
    * Creates custom excel styling options
    * @param workbook the excel workbook
-   * @return the custom style 
+   * @return the custom style
    */
   private static XSSFCellStyle getCellStyle(XSSFWorkbook workbook) {
     XSSFCellStyle style = workbook.createCellStyle(); // create style
@@ -100,18 +121,21 @@ public class ExcelDataLoader {
 
   /**
    * Determines and gets data to be placed in the appropriate column
-   * @param record current record being retrieved from the data set
+   * @param dataRecord current record being retrieved from the data set
    * @param cellid id of the cell currently being targeted
    * @return data going into the excel sheet
    */
-  private static String getCellValue(MyData record, int cellid) {
-    return (cellid == 0) ? record.getName() : record.getDate();
+  private static String getCellValue(MyData dataRecord, int cellid) {
+    return (cellid == 0) ? dataRecord.getName() : dataRecord.getDate();
   }
 
-  @SuppressWarnings("deprecation")
+  /**
+   * Gets the start date set in configuration file, updates it by the day that it is in rotation, formats it as wanted
+   * @param dayNumber the day number in the rotation schedule
+   * @return formatted day for current record to be added to array list
+   */
   private static String getDsuDate(int dayNumber) {
-    return new SimpleDateFormat("EEE, MM/dd/yy")
-        .format(new Date(startDate).getTime() + (1000 * 60 * 60 * dayNumber * 24));
+    return LocalDate.parse(startDate).plusDays(dayNumber).format(DateTimeFormatter.ofPattern("EEE, MM/dd/yy"));
   }
 
   /**
@@ -128,8 +152,16 @@ public class ExcelDataLoader {
       startDate = properties.getProperty("start.date");
       teamMembers = properties.getProperty("team.members").split(",");
       fileSaveLocation = properties.getProperty("excel.file.save.location");
-      daysInRotationSchedule = Integer.parseInt(properties.getProperty("days.in.rotation"));
-      return true;
+      isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.open.after.creation"));
+
+      Files.deleteIfExists(new File(fileSaveLocation).toPath());
+
+      if (properties.getProperty("days.in.rotation") != null) {
+        daysInRotationSchedule = Integer.parseInt(properties.getProperty("days.in.rotation"));
+      }
+
+      return teamName != null && startDate != null && teamMembers != null && fileSaveLocation != null
+          && daysInRotationSchedule > 0;
     }
     catch (IOException ex) {
       logger_.severe(ex.getMessage());
@@ -139,19 +171,14 @@ public class ExcelDataLoader {
 
   public static void main(String[] args) {
     try (XSSFWorkbook workbook = new XSSFWorkbook()) {
-      SecureRandom random = new SecureRandom(LocalDateTime.now().toString().getBytes(StandardCharsets.US_ASCII));
-      
-      ArrayList<MyData> dsuData = new ArrayList<>();
-
       if (loadConfigurations()) {
-        // removes extra space after obtaining team member names
-        for (int index = 0; index < teamMembers.length; index++ ) {
-          teamMembers[index] = teamMembers[index].trim();
-        }
-
-        addData(random, dsuData);
-
+        ArrayList<MyData> dsuData = new ArrayList<>();
+        addData(new SecureRandom(LocalDateTime.now().toString().getBytes(StandardCharsets.US_ASCII)), dsuData);
         createExcelSheet(dsuData, workbook.createSheet(teamName + " - DSU lead schedule"), workbook);
+        createFile(workbook);
+      }
+      else {
+        logger_.severe("Error, Could not create excel file");
       }
     }
     catch (IOException e) {
@@ -165,12 +192,11 @@ public class ExcelDataLoader {
    * @param row the excel sheet row
    */
   private static void setHeaders(XSSFWorkbook workbook, XSSFRow row) {
-    XSSFCellStyle style = getCellStyle(workbook);
-
-    // format header rows to be bold and sligtly higher size
-    row.createCell(0).setCellValue("Team Member");
-    row.getCell(0).setCellStyle(style);
-    row.createCell(1).setCellValue("DSU Date");
-    row.getCell(1).setCellStyle(style);
+    // format header rows to be bold and slightly larger size
+    for(int x = 0; x < 2; x++) {
+      row.createCell(x).setCellValue(x == 0 ? "Team Member" : "DSU Date");
+      row.getCell(x).setCellStyle(getCellStyle(workbook));
+    }
   }
+
 }
