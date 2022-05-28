@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Properties;
 import java.util.logging.Logger;
 
@@ -29,7 +30,7 @@ public class ExcelDataLoader {
   private static String fileSaveLocation;
   private static int daysInRotationSchedule;
   private static boolean isFileOpeningEnabled;
-  private static String[] teamMembers = new String[9];
+  private static ArrayList<String> teamMembers = new ArrayList<>(); 
   private static final Logger logger_ = Logger.getLogger(ExcelDataLoader.class.getSimpleName());
 
   /**
@@ -42,19 +43,19 @@ public class ExcelDataLoader {
     ArrayList<String> unusableNames = new ArrayList<>();
     
     for (int dayNumber = 0; dayNumber < daysInRotationSchedule; dayNumber++ ) {
-      String name = teamMembers[random.nextInt(teamMembers.length)].trim();
+      String name = teamMembers.get(random.nextInt(teamMembers.size())).trim();
 
       // while unusable names array list contains this name we have chosen, pick another name. Array list is refreshed
       // for every week, if the day we just completed for was Friday
       while (unusableNames.contains(name)) {
-        name = teamMembers[random.nextInt(teamMembers.length)].trim();
+        name = teamMembers.get(random.nextInt(teamMembers.size())).trim();
       }
 
       String date = getDsuDate(dayNumber);
 
       // avoid adding Saturdays and Sundays to the schedule maker, by only adding the record if the date doesn't
       // start with "Sat" or "Sun"
-      if (!date.startsWith("Sat") && !date.startsWith("Sun")) {
+      if (!(date.startsWith("Sat") || date.startsWith("Sun"))) {
         dsuData.add(new MyData(name, date));
         unusableNames.add(name);
       }
@@ -150,17 +151,27 @@ public class ExcelDataLoader {
 
       teamName = properties.getProperty("team.name");
       startDate = properties.getProperty("start.date");
-      teamMembers = properties.getProperty("team.members").split(",");
+      String tMembers = properties.getProperty("team.members");
+      
+      if(tMembers != null) {
+        teamMembers.addAll(Arrays.asList(tMembers.split(",")));
+      }
+      
       fileSaveLocation = properties.getProperty("excel.file.save.location");
-      isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.open.after.creation"));
-
-      Files.deleteIfExists(new File(fileSaveLocation).toPath());
+      
+      if(fileSaveLocation != null) {
+        Files.deleteIfExists(new File(fileSaveLocation).toPath());
+      }
+      
+      if(properties.getProperty("excel.file.open.after.creation") != null) {
+        isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.open.after.creation"));
+      }
 
       if (properties.getProperty("days.in.rotation") != null) {
         daysInRotationSchedule = Integer.parseInt(properties.getProperty("days.in.rotation"));
       }
 
-      return teamName != null && startDate != null && teamMembers != null && fileSaveLocation != null
+      return tMembers != null && teamName != null && startDate != null && teamMembers != null && fileSaveLocation != null
           && daysInRotationSchedule > 0;
     }
     catch (IOException ex) {
