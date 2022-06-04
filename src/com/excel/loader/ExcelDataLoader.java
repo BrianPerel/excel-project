@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Properties;
 import java.util.logging.Logger;
 
@@ -23,11 +24,18 @@ import org.apache.poi.xssf.usermodel.XSSFRow;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
+/**
+ * Main class - load configuration properties, select random names for the dates, creates an excel workbook and spreadsheet,
+ * formats the data, and adds it to the excel file.
+ * @author Brian Perel
+ *
+ */
 public class ExcelDataLoader {
 
   private static String teamName;
   private static String startDate;
   private static String fileSaveLocation;
+  private static String[] companyHolidays;
   private static int daysInRotationSchedule;
   private static boolean isFileOpeningEnabled;
   private static ArrayList<String> teamMembers = new ArrayList<>(); 
@@ -47,23 +55,28 @@ public class ExcelDataLoader {
 
       // while unusable names array list contains this name we have chosen, pick another name. Array list is refreshed
       // for every week, if the day we just completed for was Friday
-      while (unusableNames.contains(name)) {
+      while (unusableNames.contains(name) && !name.isEmpty()) {
         name = teamMembers.get(random.nextInt(teamMembers.size())).trim();
       }
 
       String date = getDsuDate(dayNumber);
-
-      // avoid adding Saturdays and Sundays to the schedule maker, by only adding the record if the date doesn't
-      // start with "Sat" or "Sun"
-      if (!(date.startsWith("Sat") || date.startsWith("Sun"))) {
-        dsuData.add(new MyData(name, date));
-        unusableNames.add(name);
+      
+      if(!isHoliday(dayNumber)) {
+        // avoid adding Saturdays and Sundays to the schedule maker, by only adding the record if the date doesn't
+        // start with "Sat" or "Sun"
+        if (!(date.startsWith("Sat") || date.startsWith("Sun"))) {
+          dsuData.add(new MyData(name, date));
+          unusableNames.add(name);
+        }
+  
+        // add in an empty row to separate the weeks. If the date that was just added in the loop started with "Fri"
+        if (date.startsWith("Fri")) {
+          dsuData.add(new MyData("", ""));
+          unusableNames.clear();
+        }
       }
-
-      // add in an empty row to separate the weeks. If the date that was just added in the loop started with "Fri"
-      if (date.startsWith("Fri")) {
-        dsuData.add(new MyData("", ""));
-        unusableNames.clear();
+      else {
+        dsuData.add(new MyData("Company Holiday", date));
       }
     }
   }
@@ -77,7 +90,7 @@ public class ExcelDataLoader {
   private static void createExcelSheet(ArrayList<MyData> dsuData, XSSFSheet spreadsheet, XSSFWorkbook workbook) {
     int rowid = 0;
     XSSFRow row = spreadsheet.createRow(rowid++ );
-
+    
     setHeaders(workbook, row);
 
     // writing the data into the sheets
@@ -140,6 +153,17 @@ public class ExcelDataLoader {
   }
 
   /**
+   * Checks to see if current date is a company holiday date
+   * @param dsuData data set that we're adding data to
+   * @param dayNumber the day number in the rotation schedule
+   * @param date current date to analyze
+   * @return if it's a holiday
+   */
+  private static boolean isHoliday(int dayNumber) {
+    return Arrays.stream(companyHolidays).anyMatch(holiday -> holiday.trim().equals(LocalDate.parse(startDate).plusDays(dayNumber).toString())); 
+  }
+
+  /**
    * Loads configurable properties that will be included in the excel sheet
    * @return boolean value determining if the properties were able to be loaded or not
    */
@@ -149,30 +173,26 @@ public class ExcelDataLoader {
     try (InputStream input = new FileInputStream("excel_sheet.properties")) {
       properties.load(input);
 
-      teamName = properties.getProperty("team.name");
-      startDate = properties.getProperty("start.date");
+      companyHolidays = properties.getProperty("com.fy22.holidays").split(",");
+      teamName = properties.getProperty("team.name", "Team X");
+      startDate = properties.getProperty("start.date", LocalDate.now().toString());
       String tMembers = properties.getProperty("team.members");
       
       if(tMembers != null) {
         teamMembers.addAll(Arrays.asList(tMembers.split(",")));
+        Collections.shuffle(teamMembers);
       }
       
-      fileSaveLocation = properties.getProperty("excel.file.save.location");
+      fileSaveLocation = properties.getProperty("excel.file.save.location").replace("/", "\\");
+      isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.open.after.creation", "false"));
       
-      if(fileSaveLocation != null) {
-        Files.deleteIfExists(new File(fileSaveLocation).toPath());
-      }
-      
-      if(properties.getProperty("excel.file.open.after.creation") != null) {
-        isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.open.after.creation"));
+      if(!properties.getProperty("days.in.rotation").isEmpty()) {
+    	  daysInRotationSchedule = Integer.parseInt(properties.getProperty("days.in.rotation", "5"));
       }
 
-      if (properties.getProperty("days.in.rotation") != null) {
-        daysInRotationSchedule = Integer.parseInt(properties.getProperty("days.in.rotation"));
-      }
-
-      return tMembers != null && teamName != null && startDate != null && teamMembers != null && fileSaveLocation != null
-          && daysInRotationSchedule > 0;
+      return tMembers != null && !tMembers.isEmpty() && teamName != null && !teamName.isEmpty()
+    	  && startDate != null && !startDate.isEmpty() && teamMembers != null 
+          && fileSaveLocation != null && !fileSaveLocation.isEmpty() && daysInRotationSchedule > 0;
     }
     catch (IOException ex) {
       logger_.severe(ex.getMessage());
@@ -183,6 +203,7 @@ public class ExcelDataLoader {
   public static void main(String[] args) {
     try (XSSFWorkbook workbook = new XSSFWorkbook()) {
       if (loadConfigurations()) {
+        Files.deleteIfExists(new File(fileSaveLocation).toPath());
         ArrayList<MyData> dsuData = new ArrayList<>();
         addData(new SecureRandom(LocalDateTime.now().toString().getBytes(StandardCharsets.US_ASCII)), dsuData);
         createExcelSheet(dsuData, workbook.createSheet(teamName + " - DSU lead schedule"), workbook);
