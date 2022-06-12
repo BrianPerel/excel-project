@@ -2,33 +2,33 @@ package com.excel.loader;
 
 public class MyData {
 
-  private String name;
-  private String date;
-  
-  public MyData(String argName, String argDate) {
-    this.name = argName;
-    this.date = argDate;
-  }
-  
-  public String getDate() {
-    return date;
-  }
+	private String name;
+	private String date;
 
-  public String getName() {
-    return name;
-  }
+	public MyData(String argName, String argDate) {
+		this.name = argName;
+		this.date = argDate;
+	}
 
-  public void setDate(String argDate) {
-    date = argDate;
-  }
+	public String getDate() {
+		return date;
+	}
 
-  public void setName(String argName) {
-    name = argName;
-  } 
-  
-  @Override
-  public String toString() {
-    return String.format("%s %s", getName(), getDate());
-  }
-  
+	public String getName() {
+		return name;
+	}
+
+	public void setDate(String argDate) {
+		date = argDate;
+	}
+
+	public void setName(String argName) {
+		name = argName;
+	}
+
+	@Override
+	public String toString() {
+		return String.format("%s %s", getName(), getDate());
+	}
+	
 }
