@@ -4,6 +4,10 @@ public class MyData {
 
 	private String name;
 	private String date;
+	
+	public MyData() {
+		this("", "");
+	}
 
 	public MyData(String argName, String argDate) {
 		this.name = argName;

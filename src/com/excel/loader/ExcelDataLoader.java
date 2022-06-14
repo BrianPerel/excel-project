@@ -6,16 +6,16 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.security.SecureRandom;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Properties;
+import java.util.Stack;
 import java.util.logging.Logger;
 
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
@@ -40,6 +40,7 @@ public class ExcelDataLoader {
 	private static String[] companyHolidays;
 	private static int daysInRotationSchedule;
 	private static boolean isFileOpeningEnabled;
+	private static Stack<String> teamMembersStack = new Stack<>();
 	private static ArrayList<String> teamMembers = new ArrayList<>();
 	private static final Logger logger_ = Logger.getLogger(ExcelDataLoader.class.getSimpleName());
 
@@ -52,44 +53,65 @@ public class ExcelDataLoader {
 	 * @throws IOException
 	 */
 	private static void addData(ArrayList<MyData> dsuData) {
-		SecureRandom random = new SecureRandom(LocalDateTime.now().toString().getBytes(StandardCharsets.US_ASCII));
-		ArrayList<String> unusableNames = new ArrayList<>();
-
-		// add empty row between headers and first data row
-		dsuData.add(new MyData("", ""));
+		teamMembersStack = getStack(teamMembers);
+		// add an empty row to separate headers row and 1st data row
+		dsuData.add(new MyData());
+		final String DATE_FORMAT = "MM/dd/yyyy";
 
 		for (int dayNumber = 0; dayNumber < daysInRotationSchedule; dayNumber++) {
-			String name = teamMembers.get(random.nextInt(teamMembers.size())).trim();
+			String date = getDsuDate(dayNumber, DATE_FORMAT);
 
-			// while unusable names array list contains this name we have chosen, pick
-			// another name. Array list is refreshed
-			// for every week, if the day we just completed for was Friday
-			while (unusableNames.contains(name) && !name.isEmpty() && teamMembers.size() > 5) {
-				name = teamMembers.get(random.nextInt(teamMembers.size())).trim();
-			}
-
-			String date = getDsuDate(dayNumber);
-
-			if (!isHoliday(dayNumber)) {
-				// avoid adding Saturdays and Sundays to the schedule maker, by only adding the
-				// record if the date doesn't
-				// start with "Sat" or "Sun"
-				if (!(date.startsWith("Sat") || date.startsWith("Sun"))) {
-					dsuData.add(new MyData(name, date));
-					unusableNames.add(name);
-				}
-
-				// add in an empty row to separate the weeks. If the date that was just added in
-				// the loop started with "Fri"
-				if (date.startsWith("Fri")) {
-					dsuData.add(new MyData("", ""));
-					unusableNames.clear();
-				}
-			} 
-			else {
+			if(isHoliday(dayNumber, DATE_FORMAT)) {
 				dsuData.add(new MyData("Company Holiday", date));
 			}
+			else {
+				// avoid adding Saturdays and Sundays to the schedule maker
+				if (date.startsWith("Sat") || date.startsWith("Sun")) {
+					continue;
+				}
+	
+				String name = getNextName(teamMembersStack).trim();
+				dsuData.add(new MyData(name, date));
+				
+				if (date.startsWith("Fri")) {
+					dsuData.add(new MyData());
+				} 
+			}
 		}
+	}
+
+	/**
+	 * Gets next name for DSU rotation schedule while enforcing that every person goes exactly once before they can go a second time
+	 * in the full rotation schedule. Pop and use the next name from the stack. 
+	 * If stack is empty create a new stack from the full team member list
+	 * 
+	 * @param argTeamMembersStack shuffled stack of random names
+	 * @return next name from the stack of names
+	 */
+	private static String getNextName(Stack<String> argTeamMembersStack) {
+		if(argTeamMembersStack.isEmpty()) {
+			argTeamMembersStack.addAll(getStack(teamMembers));
+			return getNextName(argTeamMembersStack);
+		}
+		
+		return argTeamMembersStack.pop();
+	}
+
+	/**
+	 * Creates and returns a shuffled stack of names 
+	 * 
+	 * @param argTeamMembers the names loaded from the config file
+	 * @return shuffled stack of names
+	 */
+	private static Stack<String> getStack(Collection<String> argTeamMembers) {
+		Stack<String> stack = new Stack<>();
+		
+		// create roster of names
+		List<String> members = new ArrayList<>(argTeamMembers);
+		Collections.shuffle(members); // add the random aspect by shuffling the names loaded from the config
+		
+		stack.addAll(members);
+		return stack;
 	}
 
 	/**
@@ -114,7 +136,7 @@ public class ExcelDataLoader {
 	}
 
 	/**
-	 * Writes the created/formatted data to the specified excel file
+	 * Writes the formatted data to the specified excel file
 	 * 
 	 * @param workbook the excel workbook
 	 */
@@ -126,8 +148,7 @@ public class ExcelDataLoader {
 			if (isFileOpeningEnabled) {
 				Desktop.getDesktop().open(new File(fileSaveLocation));
 			}
-		}
-		catch (IOException ex1) {
+		} catch (IOException ex1) {
 			logger_.severe(ex1.getMessage());
 		}
 	}
@@ -165,8 +186,9 @@ public class ExcelDataLoader {
 	 * @param dayNumber the day number in the rotation schedule
 	 * @return formatted day for current record to be added to array list
 	 */
-	private static String getDsuDate(int dayNumber) {
-		return LocalDate.parse(startDate).plusDays(dayNumber).format(DateTimeFormatter.ofPattern("EEE, MM/dd/yy"));
+	private static String getDsuDate(int dayNumber, String argDateFormat) {
+		return LocalDate.parse(startDate, DateTimeFormatter.ofPattern(argDateFormat)).plusDays(dayNumber)
+				.format(DateTimeFormatter.ofPattern("EEE, " + argDateFormat));
 	}
 
 	/**
@@ -177,8 +199,11 @@ public class ExcelDataLoader {
 	 * @param date current date to analyze
 	 * @return if it's a holiday
 	 */
-	private static boolean isHoliday(int dayNumber) {
-		return Arrays.stream(companyHolidays).anyMatch(holiday -> holiday.trim().equals(LocalDate.parse(startDate).plusDays(dayNumber).toString()));
+	private static boolean isHoliday(int dayNumber, String argDateFormat) {
+		return Arrays.stream(companyHolidays)
+				.anyMatch(holiday -> holiday.trim()
+				.equals(LocalDate.parse(startDate, DateTimeFormatter.ofPattern(argDateFormat)).plusDays(dayNumber)
+				.format(DateTimeFormatter.ofPattern(argDateFormat))));
 	}
 
 	/**
@@ -186,47 +211,46 @@ public class ExcelDataLoader {
 	 * 
 	 * @return boolean value determining if the properties were able to be loaded
 	 */
-  private static boolean loadConfigurations() {
-    Properties properties = new Properties();
+	private static boolean loadConfigurations() {
+		Properties properties = new Properties();
 
-	try (InputStream input = new FileInputStream("excel-sheet.properties")) {
-		properties.load(input);
+		try (InputStream input = new FileInputStream("excel-sheet.properties")) {
+			properties.load(input);
 
-		companyHolidays = properties.getProperty("com.fy22.holidays", "").split(",");
-		teamName = properties.getProperty("team.name", "");
-		teamName = (!teamName.isBlank() ? teamName + " - " : teamName) + "DSU lead schedule";
-		startDate = properties.getProperty("start.date", LocalDate.now().toString());
-		fileSaveLocation = properties.getProperty("excel.file.save.location", "./Team DSU Schedule.xlsx").replace("/", "\\");
-		isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.open.after.creation", "false"));
-		String tMembers = properties.getProperty("team.members", "Person 1, Person 2, Person 3");
+			companyHolidays = properties.getProperty("com.us.fy22.holidays", "").split(",");
+			teamName = properties.getProperty("team.name", "Team Orion") + " ";
+			startDate = properties.getProperty("start.date", LocalDate.now().toString()).trim();
+			String tMembers = properties.getProperty("team.members");
 
-		if (tMembers != null) {
-			teamMembers.addAll(Arrays.asList(tMembers.split(",")));
-			Collections.shuffle(teamMembers);
-		}
+			if (tMembers != null) {
+				teamMembers.addAll(Arrays.asList(tMembers.split(",")));
+			}
 
-		if (!properties.getProperty("days.in.rotation", "5").isBlank()) {
+			fileSaveLocation = properties.getProperty("excel.file.save.location", "Team DSU Schedule.xlsx").replace("/", "\\");
+			isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.open.after.creation", "false"));
 			daysInRotationSchedule = Integer.parseInt(properties.getProperty("days.in.rotation", "5"));
-		}
 
-		return ensureNecessaryValues(tMembers);
-	} 
-	catch (IOException ex) {
-		logger_.severe(ex.getMessage());
-		return false;
+			if (daysInRotationSchedule > 1000) {
+				daysInRotationSchedule = 100;
+			}
+
+			return ensureNecessaryValues(tMembers);
+			
+		} catch (IOException ex) {
+			logger_.severe(ex.getMessage());
+			return false;
+		}
 	}
-  }
-  
+
 	/**
-	 * Check to ensure all parameters exist and contain values.
+	 * Validates that all the loaded config file values contain something
 	 * 
-	 * @param String tMembers is inspected for pertinent properties.
-	 * @return boolean if all fields are populated.
+	 * @param tMembers team member names
+	 * @return pass or fail boolean value
 	 */
 	private static boolean ensureNecessaryValues(String tMembers) {
-		return tMembers != null && !tMembers.isEmpty() && teamName != null && startDate != null && !startDate.isEmpty()
-			&& teamMembers != null && fileSaveLocation != null && !fileSaveLocation.isEmpty()
-			&& daysInRotationSchedule > 0;
+		return tMembers != null && teamName != null && startDate != null && teamMembersStack != null
+				&& fileSaveLocation != null;
 	}
 
 	/**
@@ -240,20 +264,18 @@ public class ExcelDataLoader {
 				Files.deleteIfExists(new File(fileSaveLocation).toPath());
 				ArrayList<MyData> dsuData = new ArrayList<>();
 				addData(dsuData);
-				createExcelSheet(dsuData, workbook.createSheet(teamName), workbook);
+				createExcelSheet(dsuData, workbook.createSheet(teamName + "DSU lead schedule"), workbook);
 				createExcelFile(workbook);
-			} 
-			else {
+			} else {
 				logger_.severe("Error, Could not create excel file");
 			}
-		} 
-		catch (IOException e) {
+		} catch (IOException e) {
 			logger_.severe("Unable to create workbook. XSSFWorkbook creation error. " + e.getMessage());
 		}
 	}
 
 	/**
-	 * Sets the excel table's header to the specified font style
+	 * Sets the excel table's headers to the specified font style
 	 * 
 	 * @param workbook the excel workbook
 	 * @param row the excel sheet row
@@ -261,7 +283,7 @@ public class ExcelDataLoader {
 	private static void setHeaders(XSSFWorkbook workbook, XSSFRow row) {
 		// format header rows to be bold and slightly larger size
 		for (int x = 0; x < 2; x++) {
-			row.createCell(x).setCellValue((x == 0) ? "Team Member" : "DSU Date");
+			row.createCell(x).setCellValue(x == 0 ? "Team Member" : "DSU Date");
 			row.getCell(x).setCellStyle(getCellStyle(workbook));
 		}
 	}
