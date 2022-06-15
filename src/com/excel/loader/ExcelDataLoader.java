@@ -25,7 +25,7 @@ import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 /**
- * Main class - load configuration properties, select random names for the
+ * Main class - loads configuration properties, selects random names for the
  * dates, creates an excel workbook and spreadsheet, formats the data, and adds
  * it to the excel file.
  * 
@@ -40,6 +40,7 @@ public class ExcelDataLoader {
 	private static String[] companyHolidays;
 	private static int daysInRotationSchedule;
 	private static boolean isFileOpeningEnabled;
+	private static final String DATE_FORMAT = "MM/dd/yyyy";
 	private static Stack<String> teamMembersStack = new Stack<>();
 	private static ArrayList<String> teamMembers = new ArrayList<>();
 	private static final Logger logger_ = Logger.getLogger(ExcelDataLoader.class.getSimpleName());
@@ -49,19 +50,18 @@ public class ExcelDataLoader {
 	 * excel file
 	 * 
 	 * @param random object
-	 * @param dsuData data of names and dates
+	 * @param dsuData data list of names and dates
 	 * @throws IOException
 	 */
 	private static void addData(ArrayList<MyData> dsuData) {
-		teamMembersStack = getStack(teamMembers);
+		teamMembersStack = getStack(teamMembers); // create stack before looping
 		// add an empty row to separate headers row and 1st data row
 		dsuData.add(new MyData());
-		final String DATE_FORMAT = "MM/dd/yyyy";
 
 		for (int dayNumber = 0; dayNumber < daysInRotationSchedule; dayNumber++) {
-			String date = getDsuDate(dayNumber, DATE_FORMAT);
+			String date = getDsuDate(dayNumber);
 
-			if(isHoliday(dayNumber, DATE_FORMAT)) {
+			if(isHoliday(dayNumber)) {
 				dsuData.add(new MyData("Company Holiday", date));
 			}
 			else {
@@ -70,8 +70,7 @@ public class ExcelDataLoader {
 					continue;
 				}
 	
-				String name = getNextName(teamMembersStack).trim();
-				dsuData.add(new MyData(name, date));
+				dsuData.add(new MyData(getNextName(teamMembersStack).trim(), date));
 				
 				if (date.startsWith("Fri")) {
 					dsuData.add(new MyData());
@@ -83,12 +82,16 @@ public class ExcelDataLoader {
 	/**
 	 * Gets next name for DSU rotation schedule while enforcing that every person goes exactly once before they can go a second time
 	 * in the full rotation schedule. Pop and use the next name from the stack. 
-	 * If stack is empty create a new stack from the full team member list
+	 * If stack is empty create a new stack from the full team member list. 
+	 * 
+	 * Using a stack to ensure that every person in the shuffled list goes at least once in the full rotation, avoid duplicates,
+	 * and get a name while removing it during the pop operation
 	 * 
 	 * @param argTeamMembersStack shuffled stack of random names
 	 * @return next name from the stack of names
 	 */
 	private static String getNextName(Stack<String> argTeamMembersStack) {
+		// using recursion to populate stack and then calling it again to perform the requested action
 		if(argTeamMembersStack.isEmpty()) {
 			argTeamMembersStack.addAll(getStack(teamMembers));
 			return getNextName(argTeamMembersStack);
@@ -100,7 +103,7 @@ public class ExcelDataLoader {
 	/**
 	 * Creates and returns a shuffled stack of names 
 	 * 
-	 * @param argTeamMembers the names loaded from the config file
+	 * @param argTeamMembers the names loaded from the configuration file
 	 * @return shuffled stack of names
 	 */
 	private static Stack<String> getStack(Collection<String> argTeamMembers) {
@@ -121,8 +124,9 @@ public class ExcelDataLoader {
 	 * @param spreadsheet the excel spreadsheet
 	 * @param workbook the excel workbook
 	 */
-	private static void createExcelSheet(ArrayList<MyData> dsuData, XSSFSheet spreadsheet, XSSFWorkbook workbook) {
+	private static void createExcelSheet(ArrayList<MyData> dsuData, XSSFWorkbook workbook) {
 		int rowid = 0;
+		XSSFSheet spreadsheet = workbook.createSheet(teamName + "DSU lead schedule");
 		XSSFRow row = spreadsheet.createRow(rowid++);
 
 		setHeaders(workbook, row);
@@ -186,24 +190,24 @@ public class ExcelDataLoader {
 	 * @param dayNumber the day number in the rotation schedule
 	 * @return formatted day for current record to be added to array list
 	 */
-	private static String getDsuDate(int dayNumber, String argDateFormat) {
-		return LocalDate.parse(startDate, DateTimeFormatter.ofPattern(argDateFormat)).plusDays(dayNumber)
-				.format(DateTimeFormatter.ofPattern("EEE, " + argDateFormat));
+	private static String getDsuDate(int dayNumber) {
+		return LocalDate.parse(startDate, DateTimeFormatter.ofPattern(DATE_FORMAT)).plusDays(dayNumber)
+				.format(DateTimeFormatter.ofPattern("EEE, " + DATE_FORMAT));
 	}
 
 	/**
 	 * Checks to see if current date is a company holiday date
 	 * 
-	 * @param dsuData data set that we're adding data to
+	 * @param dsuData data list that we're adding data to
 	 * @param dayNumber the day number in the rotation schedule
 	 * @param date current date to analyze
 	 * @return if it's a holiday
 	 */
-	private static boolean isHoliday(int dayNumber, String argDateFormat) {
+	private static boolean isHoliday(int dayNumber) {
 		return Arrays.stream(companyHolidays)
 				.anyMatch(holiday -> holiday.trim()
-				.equals(LocalDate.parse(startDate, DateTimeFormatter.ofPattern(argDateFormat)).plusDays(dayNumber)
-				.format(DateTimeFormatter.ofPattern(argDateFormat))));
+				.equals(LocalDate.parse(startDate, DateTimeFormatter.ofPattern(DATE_FORMAT)).plusDays(dayNumber)
+				.format(DateTimeFormatter.ofPattern(DATE_FORMAT))));
 	}
 
 	/**
@@ -219,21 +223,13 @@ public class ExcelDataLoader {
 
 			companyHolidays = properties.getProperty("com.us.fy22.holidays", "").split(",");
 			teamName = properties.getProperty("team.name", "Team Orion") + " ";
-			startDate = properties.getProperty("start.date", LocalDate.now().toString()).trim();
-			String tMembers = properties.getProperty("team.members");
-
-			if (tMembers != null) {
-				teamMembers.addAll(Arrays.asList(tMembers.split(",")));
-			}
-
+			startDate = properties.getProperty("start.date", LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT)));
 			fileSaveLocation = properties.getProperty("excel.file.save.location", "Team DSU Schedule.xlsx").replace("/", "\\");
-			isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.open.after.creation", "false"));
-			daysInRotationSchedule = Integer.parseInt(properties.getProperty("days.in.rotation", "5"));
-
-			if (daysInRotationSchedule > 1000) {
-				daysInRotationSchedule = 100;
-			}
-
+			isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.opening.enabled", "false"));
+			daysInRotationSchedule = (properties.getProperty("rotation.days", "5").length() != 0) ?
+					Integer.parseInt(properties.getProperty("rotation.days", "5")) : 5;
+			
+			String tMembers = properties.getProperty("team.members", "Person 1, Person 2");
 			return ensureNecessaryValues(tMembers);
 			
 		} catch (IOException ex) {
@@ -249,6 +245,18 @@ public class ExcelDataLoader {
 	 * @return pass or fail boolean value
 	 */
 	private static boolean ensureNecessaryValues(String tMembers) {
+		if(startDate.isBlank())	{
+			startDate = LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT));
+		}
+		
+		if (tMembers != null) {
+			teamMembers.addAll(Arrays.asList(tMembers.split(",")));
+		}
+		
+		if (daysInRotationSchedule > 1000) {
+			daysInRotationSchedule = 100;
+		}
+		
 		return tMembers != null && teamName != null && startDate != null && teamMembersStack != null
 				&& fileSaveLocation != null;
 	}
@@ -264,7 +272,7 @@ public class ExcelDataLoader {
 				Files.deleteIfExists(new File(fileSaveLocation).toPath());
 				ArrayList<MyData> dsuData = new ArrayList<>();
 				addData(dsuData);
-				createExcelSheet(dsuData, workbook.createSheet(teamName + "DSU lead schedule"), workbook);
+				createExcelSheet(dsuData, workbook);
 				createExcelFile(workbook);
 			} else {
 				logger_.severe("Error, Could not create excel file");
