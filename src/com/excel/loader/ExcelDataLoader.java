@@ -262,18 +262,14 @@ public class ExcelDataLoader {
 	}
 
 	/**
-	 * Main method for executing the application
+	 * Initiates process of testing and creating workbook for writing to.
 	 * 
 	 * @param args from command line
 	 */
-	public static void main(String... args) {
+	public void initializeProcess() {
 		try (XSSFWorkbook workbook = new XSSFWorkbook()) {
 			if (loadConfigurations()) {
-				Files.deleteIfExists(new File(fileSaveLocation).toPath());
-				ArrayList<MyData> dsuData = new ArrayList<>();
-				addData(dsuData);
-				createExcelSheet(dsuData, workbook);
-				createExcelFile(workbook);
+				createNewSpreadsheet(workbook);
 			} else {
 				logger_.severe("Error, Could not create excel file");
 			}
@@ -281,6 +277,19 @@ public class ExcelDataLoader {
 			logger_.severe("Unable to create workbook. XSSFWorkbook creation error. " + e.getMessage());
 		}
 	}
+	
+	/**
+	 * 
+	 * @param workbook
+	 * @throws IOException
+	 */
+    private void createNewSpreadsheet(XSSFWorkbook workbook) throws IOException {
+        Files.deleteIfExists(new File(fileSaveLocation).toPath());
+        ArrayList<MyData> dsuData = new ArrayList<>();
+        addData(dsuData);
+        createExcelSheet(dsuData, workbook);
+        createExcelFile(workbook);
+    }
 
 	/**
 	 * Sets the excel table's headers to the specified font style
