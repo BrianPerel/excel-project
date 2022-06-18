@@ -110,8 +110,7 @@ public class ExcelDataLoader {
 	private static Stack<String> getStack(ArrayList<String> argTeamMembers) {
 		Stack<String> stack = new Stack<>();
 		
-		// create roster of names
-		List<String> members = new ArrayList<>(argTeamMembers);
+		List<String> members = new ArrayList<>(argTeamMembers); // create roster of names
 		Collections.shuffle(members); // add the random aspect by shuffling the names loaded from the configuration file
 		
 		stack.addAll(members);
@@ -229,6 +228,7 @@ public class ExcelDataLoader {
 			fileSaveLocation = properties.getProperty("excel.file.save.location", "Team DSU Schedule.xlsx").replace("/", "\\");
 			
 			if(!StringUtils.endsWithIgnoreCase(fileSaveLocation, ".xlsx")) {
+				logger_.warn("Provided excel file name is of incorrect file extension. Setting to .xlsx for excel");
 				fileSaveLocation = fileSaveLocation.replace(fileSaveLocation.substring(fileSaveLocation.indexOf('.')), ".xlsx");
 			}
 			
@@ -252,6 +252,7 @@ public class ExcelDataLoader {
 	 */
 	private static boolean ensureNecessaryValues(Properties properties) {
 		if(startDate.isEmpty()) {
+			logger_.warn("Provided start date is empty. Setting start date to current date");
 			startDate = LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT));
 		}
 		
@@ -283,8 +284,7 @@ public class ExcelDataLoader {
 	 * @param args from command line
 	 */
 	public static void main(String... args) {
-		System.setProperty("logs.location", "ExcelDataLoader.log");
-		PropertyConfigurator.configure(ExcelDataLoader.class.getResourceAsStream("log4j.properties"));
+		PropertyConfigurator.configure("log4j.properties");
 		logger_.info("Application Started...");
 		
 		try (XSSFWorkbook workbook = new XSSFWorkbook()) {
