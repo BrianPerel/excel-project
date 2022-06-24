@@ -26,14 +26,14 @@ import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 /**
- * Main class - loads configuration properties, selects random names for the
+ * Main class - loads properties from a configuration file, selects random names for the
  * dates, creates an excel workbook and spreadsheet, formats the data, and adds
  * it to the excel file.
  * 
  * @author Brian Perel
- *
+ * @created April 22, 2022
  */
-public class ExcelDataLoader {
+public class DsuLeadGenerator {
 	
 	private static String teamName;
 	private static String startDate;
@@ -43,8 +43,9 @@ public class ExcelDataLoader {
 	private static boolean isFileOpeningEnabled;
 	private static final String DATE_FORMAT = "MM/dd/yyyy";
 	private static Stack<String> teamMembersStack = new Stack<>();
-	private static ArrayList<String> teamMembers = new ArrayList<>();
-	private static final Logger logger_ = Logger.getLogger(ExcelDataLoader.class);
+	private static List<String> teamMembers = new ArrayList<>();
+	private static List<String> unusableNames = new ArrayList<>();
+	private static final Logger logger_ = Logger.getLogger(DsuLeadGenerator.class);
 
 	/**
 	 * Adds data of names and dates to the array list to prepare to write to the
@@ -54,9 +55,8 @@ public class ExcelDataLoader {
 	 * @param dsuData data list of names and dates
 	 * @throws IOException
 	 */
-	private static void addData(ArrayList<MyData> dsuData) {
+	private static void addData(List<MyData> dsuData) {
 		teamMembersStack = getStack(teamMembers); // create stack before looping
-		
 		dsuData.add(new MyData()); // add an empty row to separate headers row and 1st data row
 
 		for (int dayNumber = 0; dayNumber < rotationDaysSchedule; dayNumber++) {
@@ -70,11 +70,19 @@ public class ExcelDataLoader {
 				if (StringUtils.startsWithIgnoreCase(date, "Sat") || StringUtils.startsWithIgnoreCase(date, "Sun")) {
 					continue;
 				}
+				
+				String name = getNextName(teamMembersStack).trim();
+				
+				while(unusableNames.contains(name)) {
+					name = getNextName(teamMembersStack).trim();
+				}
 	
-				dsuData.add(new MyData(getNextName(teamMembersStack).trim(), date));
+				unusableNames.add(name);
+				dsuData.add(new MyData(name, date));
 				
 				if (StringUtils.startsWithIgnoreCase(date, "Fri")) {
 					dsuData.add(new MyData());
+					unusableNames.clear();
 				} 
 			}
 		}
@@ -107,7 +115,7 @@ public class ExcelDataLoader {
 	 * @param argTeamMembers the names loaded from the configuration file
 	 * @return shuffled stack of names
 	 */
-	private static Stack<String> getStack(ArrayList<String> argTeamMembers) {
+	private static Stack<String> getStack(List<String> argTeamMembers) {
 		Stack<String> stack = new Stack<>();
 		
 		List<String> members = new ArrayList<>(argTeamMembers); // create roster of names
@@ -124,7 +132,7 @@ public class ExcelDataLoader {
 	 * @param spreadsheet the excel spreadsheet
 	 * @param workbook the excel workbook
 	 */
-	private static void createExcelSheet(ArrayList<MyData> dsuData, XSSFWorkbook workbook) {
+	private static void createExcelSheet(List<MyData> dsuData, XSSFWorkbook workbook) {
 		int rowid = 0;
 		XSSFSheet spreadsheet = workbook.createSheet(teamName + "DSU lead schedule");
 		XSSFRow row = spreadsheet.createRow(rowid++);
@@ -150,7 +158,7 @@ public class ExcelDataLoader {
 			logger_.info("Process completed. Excel file created");
 
 			if (isFileOpeningEnabled) {
-				logger_.info("File opening feature is enabled. Opening " + fileSaveLocation + " file...");
+				logger_.info("File opening feature is enabled. Opening \'" + fileSaveLocation + "\' file...");
 				Desktop.getDesktop().open(new File(fileSaveLocation));
 			}
 		} catch (IOException ex1) {
@@ -193,7 +201,7 @@ public class ExcelDataLoader {
 	 */
 	private static String getDsuDate(int dayNumber) {
 		return LocalDate.parse(startDate, DateTimeFormatter.ofPattern(DATE_FORMAT)).plusDays(dayNumber)
-				.format(DateTimeFormatter.ofPattern("EEE, " + DATE_FORMAT));
+				.format(DateTimeFormatter.ofPattern("EEEE, " + DATE_FORMAT));
 	}
 
 	/**
@@ -217,26 +225,26 @@ public class ExcelDataLoader {
 	 * @return boolean value determining if the properties were able to be loaded
 	 */
 	private static boolean loadConfigurations() {
-		Properties properties = new Properties();
+		Properties table = new Properties();
 
 		try (InputStream input = new FileInputStream("excel-sheet.properties")) {
-			properties.load(input);
+			table.load(input);
 
-			companyHolidays = properties.getProperty("com.us.fy22.holidays", "").split(",");
-			teamName = properties.getProperty("team.name", "Team Orion") + " ";
-			startDate = properties.getProperty("start.date", LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT)));
-			fileSaveLocation = properties.getProperty("excel.file.save.location", "Team DSU Schedule.xlsx").replace("/", "\\");
+			companyHolidays = table.getProperty("com.us.fy22.holidays", "").split(",");
+			teamName = table.getProperty("team.name", "Team Orion") + " ";
+			startDate = table.getProperty("start.date", LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT)));
+			fileSaveLocation = table.getProperty("excel.file.save.location", "Team DSU Schedule.xlsx").replace("/", "\\");
 			
 			if(!StringUtils.endsWithIgnoreCase(fileSaveLocation, ".xlsx")) {
 				logger_.warn("Provided excel file name is of incorrect file extension. Setting to .xlsx for excel");
 				fileSaveLocation = fileSaveLocation.replace(fileSaveLocation.substring(fileSaveLocation.indexOf('.')), ".xlsx");
 			}
 			
-			isFileOpeningEnabled = Boolean.parseBoolean(properties.getProperty("excel.file.opening.enabled", "false"));
-			rotationDaysSchedule = StringUtils.isNumeric(properties.getProperty("rotation.days", "5")) ?
-					Integer.parseInt(properties.getProperty("rotation.days", "5")) : 5;
+			isFileOpeningEnabled = Boolean.parseBoolean(table.getProperty("excel.file.opening.enabled", "false"));
+			rotationDaysSchedule = (StringUtils.isNumeric(table.getProperty("rotation.days", "5"))) ?
+					Integer.parseInt(table.getProperty("rotation.days", "5")) : 5;
 
-			return ensureNecessaryValues(properties);
+			return ensureNecessaryValues(table);
 			
 		} catch (IOException ex) {
 			logger_.error(ex.getMessage());
@@ -251,8 +259,8 @@ public class ExcelDataLoader {
 	 * @return pass or fail boolean value
 	 */
 	private static boolean ensureNecessaryValues(Properties properties) {
-		if(startDate.isEmpty()) {
-			logger_.warn("Provided start date is empty. Setting start date to current date");
+		if(startDate.isEmpty() || startDate.matches("[a-zA-Z]+\\.?") || startDate.length() != 10) {
+			logger_.warn("Provided start date is empty or of incorrect format. Setting start date to current date");
 			startDate = LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT));
 		}
 		
@@ -288,14 +296,16 @@ public class ExcelDataLoader {
 		logger_.info("Application Started...");
 		
 		try (XSSFWorkbook workbook = new XSSFWorkbook()) {
-			if (loadConfigurations()) {
+			boolean isLoadSuccessful = loadConfigurations();
+			
+			if (isLoadSuccessful) {
 				Files.deleteIfExists(new File(fileSaveLocation).toPath());
-				ArrayList<MyData> dsuData = new ArrayList<>();
+				List<MyData> dsuData = new ArrayList<>();
 				addData(dsuData);
 				createExcelSheet(dsuData, workbook);
 				createExcelFile(workbook);
 			} else {
-				logger_.error("Error, Could not create excel file");
+				logger_.error("Error, Could not load excel file property settings. Please check your \'excel-sheet.properties\' configurations");
 			}
 		} catch (IOException e) {
 			logger_.error("Unable to create workbook. XSSFWorkbook creation error. " + e.getMessage());

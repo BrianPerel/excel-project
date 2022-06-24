@@ -1,5 +1,10 @@
 package com.excel.loader;
 
+/**
+ * Creates a record object for our DSU data list, containing a name and date to be added
+ * @author Brian
+ * 
+ */
 public class MyData {
 
 	private String name;
