@@ -1,12 +1,15 @@
 package com.excel.loader;
 
+import static org.apache.poi.ss.usermodel.IndexedColors.GREY_25_PERCENT;
+import static org.apache.poi.ss.usermodel.IndexedColors.LIGHT_YELLOW;
+import static org.apache.poi.ss.usermodel.IndexedColors.SKY_BLUE;
+
 import java.awt.Desktop;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -19,6 +22,9 @@ import java.util.Stack;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFRow;
@@ -35,28 +41,28 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
  */
 public class DsuLeadGenerator {
 	
-	private static String teamName;
-	private static String startDate;
-	private static String fileSaveLocation;
-	private static String[] companyHolidays;
-	private static int rotationDaysSchedule;
-	private static boolean isFileOpeningEnabled;
 	private static final String DATE_FORMAT = "MM/dd/yyyy";
-	private static Stack<String> teamMembersStack = new Stack<>();
-	private static List<String> teamMembers = new ArrayList<>();
-	private static List<String> unusableNames = new ArrayList<>();
 	private static final Logger logger_ = Logger.getLogger(DsuLeadGenerator.class);
+	
+	private String teamName;
+	private String startDate;
+	private String fileSaveLocation;
+	private String[] companyHolidays;
+	private int rotationDaysSchedule;
+	private boolean isFileOpeningEnabled;
+	private Stack<String> teamMembersStack = new Stack<>();
+	private List<String> teamMembers = new ArrayList<>(10);
 
 	/**
-	 * Adds data of names and dates to the array list to prepare to write to the
-	 * excel file
+	 * Adds data of names and dates to the array list to prepare to write to the excel file
 	 * 
 	 * @param random object
 	 * @param dsuData data list of names and dates
 	 * @throws IOException
 	 */
-	private static void addData(List<MyData> dsuData) {
-		teamMembersStack = getStack(teamMembers); // create stack before looping
+	private void addData(List<MyData> dsuData) {
+		List<String> unusableNames = new ArrayList<>(5);
+		teamMembersStack = getStack(); // create stack before looping
 		dsuData.add(new MyData()); // add an empty row to separate headers row and 1st data row
 
 		for (int dayNumber = 0; dayNumber < rotationDaysSchedule; dayNumber++) {
@@ -66,19 +72,19 @@ public class DsuLeadGenerator {
 				dsuData.add(new MyData("Company Holiday", date));
 			}
 			else {
-				// avoid adding Saturdays and Sundays to the schedule maker
 				if (StringUtils.startsWithIgnoreCase(date, "Sat") || StringUtils.startsWithIgnoreCase(date, "Sun")) {
-					continue;
+					continue; // avoid adding Saturdays and Sundays to the schedule maker
 				}
 				
-				String name = getNextName(teamMembersStack).trim();
+				String chosenName = avoidDuplicateNames(unusableNames); 
 				
-				while(unusableNames.contains(name)) {
-					name = getNextName(teamMembersStack).trim();
+				// avoids an infinite loop by avoiding duplicate name comparison, if number of team members entered is 5 or less. 
+				// Since we have 5 days in a week and having 5 or less people wouldn't allow us to avoid duplicates
+				if(teamMembers.size() > 5) {
+					unusableNames.add(chosenName);
 				}
 	
-				unusableNames.add(name);
-				dsuData.add(new MyData(name, date));
+				dsuData.add(new MyData(chosenName, date));
 				
 				if (StringUtils.startsWithIgnoreCase(date, "Fri")) {
 					dsuData.add(new MyData());
@@ -86,6 +92,22 @@ public class DsuLeadGenerator {
 				} 
 			}
 		}
+	}
+
+	/**
+	 * Prevents duplicate names from being used in any 1 week
+	 * 
+	 * @param unusableNames names that have already been used this week
+	 * @return a uniquely chosen name 
+	 */
+	private String avoidDuplicateNames(List<String> unusableNames) {
+		String name = getNextName(teamMembersStack);
+		
+		while(unusableNames.contains(name)) {
+			name = getNextName(teamMembersStack);
+		}
+		
+		return name.trim();
 	}
 
 	/**
@@ -99,11 +121,10 @@ public class DsuLeadGenerator {
 	 * @param argTeamMembersStack shuffled stack of random names
 	 * @return next name from the stack of names
 	 */
-	private static String getNextName(Stack<String> argTeamMembersStack) {
-		// using recursion to populate the stack if needed and then immediately calling it again to perform the requested action
+	private String getNextName(Stack<String> argTeamMembersStack) {
+		// populate the stack if it's empty
 		if(argTeamMembersStack.isEmpty()) {
-			argTeamMembersStack.addAll(getStack(teamMembers));
-			return getNextName(argTeamMembersStack);
+			argTeamMembersStack.addAll(getStack());
 		}
 		
 		return argTeamMembersStack.pop();
@@ -115,13 +136,12 @@ public class DsuLeadGenerator {
 	 * @param argTeamMembers the names loaded from the configuration file
 	 * @return shuffled stack of names
 	 */
-	private static Stack<String> getStack(List<String> argTeamMembers) {
+	private Stack<String> getStack() {
 		Stack<String> stack = new Stack<>();
 		
-		List<String> members = new ArrayList<>(argTeamMembers); // create roster of names
-		Collections.shuffle(members); // add the random aspect by shuffling the names loaded from the configuration file
+		Collections.shuffle(teamMembers); // add the random aspect by shuffling the names loaded from the configuration file
 		
-		stack.addAll(members);
+		stack.addAll(teamMembers);
 		return stack;
 	}
 
@@ -132,19 +152,35 @@ public class DsuLeadGenerator {
 	 * @param spreadsheet the excel spreadsheet
 	 * @param workbook the excel workbook
 	 */
-	private static void createExcelSheet(List<MyData> dsuData, XSSFWorkbook workbook) {
+	private void createExcelSheet(List<MyData> dsuData, XSSFWorkbook workbook) {
 		int rowid = 0;
-		XSSFSheet spreadsheet = workbook.createSheet(teamName + "DSU lead schedule");
+		XSSFSheet spreadsheet = workbook.createSheet(teamName.concat("DSU lead schedule"));
 		XSSFRow row = spreadsheet.createRow(rowid++);
 
 		setHeaders(workbook, row);
 
-		// writing the data into the sheets
+		// writing the data into the excel sheet
 		for (MyData dataRecord : dsuData) {
 			row = spreadsheet.createRow(rowid++);
 			row.createCell(0).setCellValue(getCellValue(dataRecord, 0));
 			row.createCell(1).setCellValue(getCellValue(dataRecord, 1));
+			
+			// if row is not apply gray color background
+			if(!dataRecord.getName().isEmpty()) {
+				row.getCell(0).setCellStyle(getCellStyle(workbook, GREY_25_PERCENT, false));
+				row.getCell(1).setCellStyle(getCellStyle(workbook, GREY_25_PERCENT, false));
+			}
+			
+			// if company holiday apply yellow color background to cell
+			if(row.getCell(0).getStringCellValue().equalsIgnoreCase("Company Holiday")) {
+				row.getCell(0).setCellStyle(getCellStyle(workbook, LIGHT_YELLOW, true));
+				row.getCell(1).setCellStyle(getCellStyle(workbook, LIGHT_YELLOW, true));
+			}
 		}
+		
+		// permanently auto expands selected cell 
+		spreadsheet.autoSizeColumn(0);
+		spreadsheet.autoSizeColumn(1);
 	}
 
 	/**
@@ -152,10 +188,10 @@ public class DsuLeadGenerator {
 	 * 
 	 * @param workbook the excel workbook
 	 */
-	private static void createExcelFile(XSSFWorkbook workbook) {
+	private void createExcelFile(XSSFWorkbook workbook) {
 		try (FileOutputStream out = new FileOutputStream(new File(fileSaveLocation))) {
-			workbook.write(out);
 			logger_.info("Process completed. Excel file created");
+			workbook.write(out);
 
 			if (isFileOpeningEnabled) {
 				logger_.info("File opening feature is enabled. Opening \'" + fileSaveLocation + "\' file...");
@@ -172,12 +208,23 @@ public class DsuLeadGenerator {
 	 * @param workbook the excel workbook
 	 * @return the custom style
 	 */
-	private static XSSFCellStyle getCellStyle(XSSFWorkbook workbook) {
+	private XSSFCellStyle getCellStyle(XSSFWorkbook workbook, IndexedColors color, boolean isCustomFontNeeded) {
 		XSSFCellStyle style = workbook.createCellStyle(); // create style
-		XSSFFont font = workbook.createFont(); // create font
-		font.setBold(true); // set to bold font
-		font.setFontHeight(12); // set font height
-		style.setFont(font); // set font
+		style.setFillPattern(FillPatternType.SOLID_FOREGROUND); // set the fill pattern to be solid whole
+		style.setFillForegroundColor(color.index); // set the fill color style
+		style.setBorderBottom(BorderStyle.THIN); // create border styles
+		style.setBorderTop(BorderStyle.THIN);
+		style.setBorderRight(BorderStyle.THIN);
+		style.setBorderLeft(BorderStyle.THIN);
+		
+		// custom font is only needed for headers and holiday date cells
+		if(isCustomFontNeeded) {
+			XSSFFont font = workbook.createFont(); // create font
+			font.setBold(true); // set to bold font
+			font.setFontHeight(12); // set font height
+			style.setFont(font); // set font
+		}
+		
 		return style;
 	}
 
@@ -188,7 +235,7 @@ public class DsuLeadGenerator {
 	 * @param cellid id of the cell currently being targeted
 	 * @return data going into the excel sheet
 	 */
-	private static String getCellValue(MyData dataRecord, int cellid) {
+	private String getCellValue(MyData dataRecord, int cellid) {
 		return (cellid == 0) ? dataRecord.getName() : dataRecord.getDate();
 	}
 
@@ -199,7 +246,7 @@ public class DsuLeadGenerator {
 	 * @param dayNumber the day number in the rotation schedule
 	 * @return formatted day for current record to be added to array list
 	 */
-	private static String getDsuDate(int dayNumber) {
+	private String getDsuDate(int dayNumber) {
 		return LocalDate.parse(startDate, DateTimeFormatter.ofPattern(DATE_FORMAT)).plusDays(dayNumber)
 				.format(DateTimeFormatter.ofPattern("EEEE, " + DATE_FORMAT));
 	}
@@ -212,11 +259,10 @@ public class DsuLeadGenerator {
 	 * @param date current date to analyze
 	 * @return if it's a holiday
 	 */
-	private static boolean isHoliday(int dayNumber) {
+	private boolean isHoliday(int dayNumber) {
 		return Arrays.stream(companyHolidays)
 				.anyMatch(holiday -> holiday.trim()
-				.equals(LocalDate.parse(startDate, DateTimeFormatter.ofPattern(DATE_FORMAT)).plusDays(dayNumber)
-				.format(DateTimeFormatter.ofPattern(DATE_FORMAT))));
+				.equals(getDsuDate(dayNumber).substring(getDsuDate(dayNumber).indexOf(' ') + 1)));
 	}
 
 	/**
@@ -224,10 +270,10 @@ public class DsuLeadGenerator {
 	 * 
 	 * @return boolean value determining if the properties were able to be loaded
 	 */
-	private static boolean loadConfigurations() {
+	private boolean loadConfigurations(String arg) {
 		Properties table = new Properties();
 
-		try (InputStream input = new FileInputStream("excel-sheet.properties")) {
+		try (InputStream input = new FileInputStream(arg)) {
 			table.load(input);
 
 			companyHolidays = table.getProperty("com.us.fy22.holidays", "").split(",");
@@ -258,16 +304,33 @@ public class DsuLeadGenerator {
 	 * @param tMembers team member's names
 	 * @return pass or fail boolean value
 	 */
-	private static boolean ensureNecessaryValues(Properties properties) {
-		if(startDate.isEmpty() || startDate.matches("[a-zA-Z]+\\.?") || startDate.length() != 10) {
-			logger_.warn("Provided start date is empty or of incorrect format. Setting start date to current date");
-			startDate = LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT));
+	private boolean ensureNecessaryValues(Properties properties) {
+		if(startDate.length() != 10 || startDate.matches("[a-zA-Z]+\\.?")) {
+			String currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT));
+			logger_.warn("Provided start date is empty or of incorrect format. Setting start date to current date: \'" + currentDate + "\'");
+			startDate = currentDate;
 		}
 		
-		String tMembers = properties.getProperty("team.members", "");
-		
+		String tMembers = properties.getProperty("team.members", "Person 1, Person 2, Person 3, Person 4, Person 5");
+
 		if (tMembers != null) {
-			teamMembers.addAll(Arrays.asList(tMembers.split(",")));
+			teamMembers.addAll(Arrays.asList(tMembers.split(","))); // create roster of names
+			
+			if(teamMembers.size() == 1 && teamMembers.get(0).equals("")) {
+				teamMembers.remove(0);
+				teamMembers.addAll(Arrays.asList(("Person 1, Person 2, Person 3, Person 4, Person 5").split(",")));
+				logger_.warn("Team members property list was empty. Adding elements to list");
+			}
+			else if(teamMembers.size() < 5) {
+				int membersNeeded = 5 - teamMembers.size();
+				
+				for(int x = 0; x < membersNeeded; x++) {
+					int y = x;
+					teamMembers.add("Person " + (++y));
+				}
+				
+				logger_.warn("team members property list was of a lesser size than required, additional element names have been added");
+			}
 		}
 		
 		for(int x = 0; x < teamMembers.size(); x++) {
@@ -295,11 +358,15 @@ public class DsuLeadGenerator {
 		PropertyConfigurator.configure("log4j.properties");
 		logger_.info("Application Started...");
 		
+		DsuLeadGenerator run = new DsuLeadGenerator();
+		run.execute(args.length == 0 ? "excel-sheet.properties" : args[0]);
+	}
+
+	private void execute(String arg) {
 		try (XSSFWorkbook workbook = new XSSFWorkbook()) {
-			boolean isLoadSuccessful = loadConfigurations();
+			boolean isLoadSuccessful = loadConfigurations(arg);
 			
 			if (isLoadSuccessful) {
-				Files.deleteIfExists(new File(fileSaveLocation).toPath());
 				List<MyData> dsuData = new ArrayList<>();
 				addData(dsuData);
 				createExcelSheet(dsuData, workbook);
@@ -309,7 +376,7 @@ public class DsuLeadGenerator {
 			}
 		} catch (IOException e) {
 			logger_.error("Unable to create workbook. XSSFWorkbook creation error. " + e.getMessage());
-		}
+		}		
 	}
 
 	/**
@@ -318,11 +385,11 @@ public class DsuLeadGenerator {
 	 * @param workbook the excel workbook
 	 * @param row the excel sheet row
 	 */
-	private static void setHeaders(XSSFWorkbook workbook, XSSFRow row) {
+	private void setHeaders(XSSFWorkbook workbook, XSSFRow row) {
 		// format header rows to be bold and slightly larger size
 		for (int x = 0; x < 2; x++) {
 			row.createCell(x).setCellValue(x == 0 ? "Team Member" : "DSU Date");
-			row.getCell(x).setCellStyle(getCellStyle(workbook));
+			row.getCell(x).setCellStyle(getCellStyle(workbook, SKY_BLUE, true));
 		}
 	}
 }
