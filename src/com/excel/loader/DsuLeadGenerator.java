@@ -65,17 +65,18 @@ public class DsuLeadGenerator {
 		teamMembersStack = getStack(); // create stack before looping
 		dsuData.add(new MyData()); // add an empty row to separate headers row and 1st data row
 
-		for (int dayNumber = 0; dayNumber < rotationDaysSchedule; dayNumber++) {
+		for (int dayNumber = 0; dayNumber <= rotationDaysSchedule; dayNumber++) {
 			String date = getDsuDate(dayNumber);
+			
+			if (StringUtils.startsWithIgnoreCase(date, "Sat") || StringUtils.startsWithIgnoreCase(date, "Sun")) {
+				rotationDaysSchedule++; // since we're not counting weekend days, increment variable here to count this day number as a week day later
+				continue; // avoid adding Saturdays and Sundays to the schedule maker
+			}
 			
 			if(isHoliday(dayNumber)) {
 				dsuData.add(new MyData("Company Holiday", date));
 			}
 			else {
-				if (StringUtils.startsWithIgnoreCase(date, "Sat") || StringUtils.startsWithIgnoreCase(date, "Sun")) {
-					continue; // avoid adding Saturdays and Sundays to the schedule maker
-				}
-				
 				String chosenName = avoidDuplicateNames(unusableNames); 
 				
 				// avoids an infinite loop by avoiding duplicate name comparison, if number of team members entered is 5 or less. 
@@ -85,12 +86,12 @@ public class DsuLeadGenerator {
 				}
 	
 				dsuData.add(new MyData(chosenName, date));
-				
-				if (StringUtils.startsWithIgnoreCase(date, "Fri")) {
-					dsuData.add(new MyData());
-					unusableNames.clear();
-				} 
 			}
+			
+			if (StringUtils.startsWithIgnoreCase(date, "Fri")) {
+				dsuData.add(new MyData());
+				unusableNames.clear();
+			} 
 		}
 	}
 
@@ -162,19 +163,19 @@ public class DsuLeadGenerator {
 		// writing the data into the excel sheet
 		for (MyData dataRecord : dsuData) {
 			row = spreadsheet.createRow(rowid++);
-			row.createCell(0).setCellValue(getCellValue(dataRecord, 0));
-			row.createCell(1).setCellValue(getCellValue(dataRecord, 1));
 			
-			// if row is not apply gray color background
-			if(!dataRecord.getName().isEmpty()) {
-				row.getCell(0).setCellStyle(getCellStyle(workbook, GREY_25_PERCENT, false));
-				row.getCell(1).setCellStyle(getCellStyle(workbook, GREY_25_PERCENT, false));
-			}
-			
-			// if company holiday apply yellow color background to cell
-			if(row.getCell(0).getStringCellValue().equalsIgnoreCase("Company Holiday")) {
-				row.getCell(0).setCellStyle(getCellStyle(workbook, LIGHT_YELLOW, true));
-				row.getCell(1).setCellStyle(getCellStyle(workbook, LIGHT_YELLOW, true));
+			for (int column = 0; column < 2; column++) {
+				row.createCell(column).setCellValue(getCellValue(dataRecord, column));
+				
+				// if row is not apply gray color background
+				if(!dataRecord.getName().isEmpty()) {
+					row.getCell(column).setCellStyle(getCellStyle(workbook, GREY_25_PERCENT, false));
+				}
+				
+				// if company holiday apply yellow color background to cell
+				if(row.getCell(0).getStringCellValue().equalsIgnoreCase("Company Holiday")) {
+					row.getCell(column).setCellStyle(getCellStyle(workbook, LIGHT_YELLOW, true));
+				}
 			}
 		}
 		
@@ -221,6 +222,7 @@ public class DsuLeadGenerator {
 		if(isCustomFontNeeded) {
 			XSSFFont font = workbook.createFont(); // create font
 			font.setBold(true); // set to bold font
+			font.setItalic(true); // set to italic font
 			font.setFontHeight(12); // set font height
 			style.setFont(font); // set font
 		}
@@ -271,26 +273,29 @@ public class DsuLeadGenerator {
 	 * @return boolean value determining if the properties were able to be loaded
 	 */
 	private boolean loadConfigurations(String arg) {
-		Properties table = new Properties();
+		Properties propTable = new Properties();
 
 		try (InputStream input = new FileInputStream(arg)) {
-			table.load(input);
+			propTable.load(input);
 
-			companyHolidays = table.getProperty("com.us.fy22.holidays", "").split(",");
-			teamName = table.getProperty("team.name", "Team Orion") + " ";
-			startDate = table.getProperty("start.date", LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT)));
-			fileSaveLocation = table.getProperty("excel.file.save.location", "Team DSU Schedule.xlsx").replace("/", "\\");
-			
-			if(!StringUtils.endsWithIgnoreCase(fileSaveLocation, ".xlsx")) {
+			companyHolidays = propTable.getProperty("com.us.fy22.holidays", "").split(",");
+			teamName = propTable.getProperty("team.name", "Team Orion").trim() + " ";
+			startDate = propTable.getProperty("start.date", LocalDate.now().format(DateTimeFormatter.ofPattern(DATE_FORMAT))).trim();
+			fileSaveLocation = propTable.getProperty("excel.file.save.location", "Team DSU Schedule.xlsx").replace("/", "\\").trim();
+
+			if(fileSaveLocation.length() != 0 && !StringUtils.endsWithIgnoreCase(fileSaveLocation, ".xlsx")) {
 				logger_.warn("Provided excel file name is of incorrect file extension. Setting to .xlsx for excel");
 				fileSaveLocation = fileSaveLocation.replace(fileSaveLocation.substring(fileSaveLocation.indexOf('.')), ".xlsx");
 			}
+			else if(fileSaveLocation.length() == 0) {
+				fileSaveLocation = "Team DSU Schedule.xlsx";
+			}
 			
-			isFileOpeningEnabled = Boolean.parseBoolean(table.getProperty("excel.file.opening.enabled", "false"));
-			rotationDaysSchedule = (StringUtils.isNumeric(table.getProperty("rotation.days", "5"))) ?
-					Integer.parseInt(table.getProperty("rotation.days", "5")) : 5;
+			isFileOpeningEnabled = Boolean.parseBoolean(propTable.getProperty("excel.file.opening.enabled", "false").trim());
+			rotationDaysSchedule = (StringUtils.isNumeric(propTable.getProperty("business.rotation.days", "5"))) ?
+					Integer.parseInt(propTable.getProperty("business.rotation.days", "5")) : 5;
 
-			return ensureNecessaryValues(table);
+			return ensureNecessaryValues(propTable);
 			
 		} catch (IOException ex) {
 			logger_.error(ex.getMessage());
@@ -386,10 +391,10 @@ public class DsuLeadGenerator {
 	 * @param row the excel sheet row
 	 */
 	private void setHeaders(XSSFWorkbook workbook, XSSFRow row) {
-		// format header rows to be bold and slightly larger size
-		for (int x = 0; x < 2; x++) {
-			row.createCell(x).setCellValue(x == 0 ? "Team Member" : "DSU Date");
-			row.getCell(x).setCellStyle(getCellStyle(workbook, SKY_BLUE, true));
+		// format header rows to be bold and slightly larger size (2 stands for 2 columns)
+		for (int column = 0; column < 2; column++) {
+			row.createCell(column).setCellValue(column == 0 ? "Team Member" : "DSU Date");
+			row.getCell(column).setCellStyle(getCellStyle(workbook, SKY_BLUE, true));
 		}
 	}
 }
